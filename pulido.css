@@ -1,0 +1,128 @@
+/* Pulido visual · Oficios de exoneración · Municipalidad de Pococí
+   Se carga DESPUÉS del <style> original. Todo va dentro de @media screen:
+   la hoja carta (.page), la impresión y los PDF quedan exactamente igual. */
+@media screen{
+:root{
+ --navy:#1b4789;--navy-d:#153868;--green:#0a8f4f;--teal:#35aa9a;
+ --ink:#14213d;--muted:#5b6472;--line:#dde2ea;--line-h:#b9c0cc;
+ --canvas:#e4e8ee;--danger:#b3261e;
+ --ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+ --ring:0 0 0 3px rgba(27,71,137,.25);
+ color-scheme:light;
+}
+::selection{background:rgba(27,71,137,.2)}
+body{background:var(--canvas)}
+.page{box-shadow:0 1px 2px rgba(20,33,61,.08),0 14px 36px rgba(20,33,61,.18)}
+
+/* ---- Botones: respuesta inmediata al presionar ---- */
+.mini{
+ font:600 12.5px/1.2 var(--ui);color:var(--ink);background:#fff;
+ border:1px solid var(--line);border-radius:9px;padding:8px 12px;margin:3px 6px 3px 0;
+ transition:transform .1s ease-out,background-color .12s,border-color .12s,box-shadow .12s;
+}
+.mini:hover{border-color:var(--line-h);background:#f7f9fc}
+.mini:active{transform:scale(.97)}
+.mini:focus-visible,.btn:focus-visible,.expediente:focus-visible,.borrar-expediente:focus-visible{outline:none;box-shadow:var(--ring)}
+.mini:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.mini.on{background:var(--navy);border-color:var(--navy);color:#fff}
+
+/* ---- Panel de datos ---- */
+.panel{
+ font-family:var(--ui);border-radius:16px;padding:22px 24px;gap:16px 18px;
+ box-shadow:0 1px 2px rgba(20,33,61,.06),0 8px 24px rgba(20,33,61,.08);
+}
+.panel h2{font-size:17px;font-weight:650;letter-spacing:-.015em;color:var(--ink)}
+.panel label{font:600 12px/1.3 var(--ui);color:var(--muted);gap:5px}
+.panel input,.panel select{
+ height:38px;padding:0 11px;font:14px var(--ui);color:var(--ink);background:#fff;
+ border:1px solid var(--line);border-radius:10px;
+ transition:border-color .12s,box-shadow .12s;
+}
+.panel input:hover,.panel select:hover{border-color:var(--line-h)}
+.panel input:focus-visible,.panel select:focus-visible{outline:none;border-color:var(--navy);box-shadow:var(--ring)}
+.panel input:disabled{background:#f3f5f8;color:var(--muted)}
+#ced,#num{font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.est{font-family:var(--ui)}
+.panel .est:not(:empty){display:inline-flex;align-items:center;padding:5px 11px;border-radius:999px;margin:0 0 10px}
+.est.ok{background:#e6f4ec}
+.est.err{background:#fcebea}
+#dbinfo{display:block;margin-top:6px}
+
+/* ---- Explorador: material translúcido con la barra de la membrete ---- */
+#explorer{
+ font-family:var(--ui);padding:0 14px 14px;border-radius:16px;
+ background:rgba(255,255,255,.74);
+ -webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
+ border:1px solid rgba(255,255,255,.65);
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 10px 32px rgba(20,33,61,.16);
+}
+#explorer::before{
+ content:"";display:block;height:5px;margin:0 -14px 14px;
+ background:linear-gradient(90deg,#0a8f4f 0 35%,#1b4789 35% 61%,#f39c12 61% 74%,#fdd020 74% 91.5%,#35aa9a 91.5%);
+}
+#explorer h2{font-size:16px;font-weight:650;letter-spacing:-.015em;color:var(--ink)}
+#explorer p{color:var(--muted)}
+#explorer .mini{
+ display:flex;width:100%;margin:4px 0;padding:9px 11px;border:0;
+ background:rgba(27,71,137,.08);color:var(--navy);
+}
+#explorer .mini:hover{background:rgba(27,71,137,.14)}
+#explorer .mini:disabled{background:rgba(0,0,0,.04);color:var(--muted)}
+#borrarExpediente,#borrarBaseLocal{color:var(--danger)!important;background:rgba(179,38,30,.07)!important}
+#borrarExpediente:hover,#borrarBaseLocal:hover{background:rgba(179,38,30,.13)!important}
+#expedientes{border-top:0;margin:10px 0}
+.expediente-item{border:0;border-radius:10px;margin:2px 0}
+.expediente{border:0;border-radius:10px;background:transparent;padding:9px 11px;line-height:1.4;transition:background-color .12s}
+.expediente:hover{background:rgba(0,0,0,.045)}
+.expediente.active{background:rgba(27,71,137,.12);box-shadow:inset 3px 0 var(--navy)}
+.expediente small{color:var(--muted)}
+.expediente-item .borrar-expediente{border-radius:8px;transition:background-color .12s}
+.expediente-item .borrar-expediente:hover{background:rgba(179,38,30,.1)}
+.archivo-exp{font-size:12px;border-bottom-color:rgba(0,0,0,.06)}
+
+/* ---- Imprimir: siempre al alcance, sin tapar la hoja ---- */
+#imprimir.btn{
+ position:sticky;bottom:18px;z-index:4;margin:0 auto 26px;padding:13px 28px;
+ font:650 15px var(--ui);letter-spacing:-.005em;background:var(--navy);border-radius:999px;
+ box-shadow:0 8px 24px rgba(27,71,137,.38);
+ transition:transform .1s ease-out,background-color .12s,box-shadow .12s;
+}
+#imprimir.btn:hover{background:var(--navy-d)}
+#imprimir.btn:active{transform:scale(.97);box-shadow:0 4px 12px rgba(27,71,137,.38)}
+
+/* ---- Editor de Excel ---- */
+#modal{background:rgba(15,23,42,.45);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+#modal .in{
+ font-family:var(--ui);border-radius:16px;padding:14px 16px;
+ box-shadow:0 24px 60px rgba(0,0,0,.35);
+ animation:hoja-abre .28s cubic-bezier(.2,.9,.3,1);
+}
+@keyframes hoja-abre{from{opacity:0;transform:translateY(14px) scale(.985)}}
+#modal select{height:30px;padding:0 8px;border:1px solid var(--line);border-radius:8px;font:12.5px var(--ui)}
+#modal .in>div:first-child small{display:block;margin-top:8px;color:var(--muted);font-size:11px;line-height:1.45;max-height:2.9em;overflow:auto}
+#modal td,#modal th{border-color:var(--line)}
+#modal th{background:#eef1f6;color:var(--muted);font-weight:600}
+#formulaTools input{border:1px solid var(--line);border-radius:8px}
+#formulaTools input:focus-visible,#modal [contenteditable=true]:focus-visible{outline:none;border-color:var(--navy);box-shadow:var(--ring)}
+#tb td.selected{outline-color:var(--navy)}
+
+@media(max-width:850px){
+ #explorer{position:relative}
+ #imprimir.btn{bottom:10px}
+}
+}
+
+/* ---- Accesibilidad ---- */
+@media screen and (prefers-reduced-motion:reduce){
+ #modal .in{animation:none}
+ .mini,.btn,.expediente,.panel input,.panel select{transition:none}
+ .mini:active,#imprimir.btn:active{transform:none}
+}
+@media screen and (prefers-reduced-transparency:reduce){
+ #explorer{background:#fff;-webkit-backdrop-filter:none;backdrop-filter:none}
+ #modal{background:rgba(15,23,42,.7);-webkit-backdrop-filter:none;backdrop-filter:none}
+}
+@media screen and (prefers-contrast:more){
+ .panel input,.panel select,.mini{border-color:var(--ink)}
+ #explorer{background:#fff;border-color:var(--ink)}
+}
