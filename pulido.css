@@ -126,3 +126,15 @@ body{background:var(--canvas)}
  .panel input,.panel select,.mini{border-color:var(--ink)}
  #explorer{background:#fff;border-color:var(--ink)}
 }
+
+@media screen {
+ #explorer label{display:block;margin:.55em 0}
+ #explorer input[type="search"],#explorer select{display:block;width:100%;box-sizing:border-box}
+ .archivo-exp{display:block}
+ .archivo-exp button{color:var(--navy);padding:5px}
+ .archivo-exp [data-accion="borrar"]{color:var(--danger)}
+ .excel-pdf-captura{color:#000;background:#fff;font-family:Arial,sans-serif}
+ .excel-pdf-captura table{width:100%;min-width:0;table-layout:fixed}
+ .excel-pdf-captura th,.excel-pdf-captura td{padding:2px;white-space:normal;overflow-wrap:anywhere;font-size:6pt}
+ .excel-pdf-captura .row-number{position:static}
+}
