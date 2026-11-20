@@ -122,7 +122,11 @@ table.doc{width:100%;border-collapse:collapse}
  <button class="mini" id="exportarCarpeta" disabled>Descargar carpeta ZIP</button>
  <button class="mini" id="borrarExpediente" disabled>Eliminar carpeta seleccionada</button>
  <button class="mini" id="borrarBaseLocal">Borrar base guardada en el navegador</button>
+ <label>Buscar expedientes <input id="buscarExpediente" type="search" placeholder="Nombre o cédula"></label>
  <div id="expedientes" aria-label="Carpetas"></div>
+ <button class="mini" id="renombrarExpediente" disabled>Renombrar carpeta</button>
+ <label>Buscar archivos <input id="buscarArchivo" type="search" placeholder="Nombre del archivo"></label>
+ <label>Ordenar <select id="ordenArchivos"><option value="nombre">Nombre</option><option value="fecha">Más recientes</option><option value="tamano">Mayor tamaño</option></select></label>
  <div id="archivosExp" aria-live="polite"></div>
  <p>Los PDF del oficio y del Excel se guardan aquí automáticamente al imprimir.</p>
  <div id="estadoExplorer" class="est" role="status"></div>
@@ -172,7 +176,7 @@ table.doc{width:100%;border-collapse:collapse}
 <section class="excel-print" id="excelPrint"></section>
 <button class="btn noprint" id="imprimir">Imprimir oficio + Excel / Guardar PDFs</button>
 
-<div id="modal"><div class="in noprint"><div><button class="mini" id="cerrar">✕ Cerrar</button> <button class="mini" id="imprimirExcel">Imprimir Excel separado / Guardar PDF</button> <b id="mtit"></b> <select id="hojas"></select> <small>Seleccione una celda y edite su valor o fórmula. Funciones disponibles: SUMA, PROMEDIO, MIN, MAX, SI, CONTAR, CONTARA, CONTAR.SI, SUMAR.SI, PROMEDIO.SI, MEDIANA, MODA, DESVEST, REDONDEAR, ABS, ENTERO, POTENCIA, RAIZ, IZQUIERDA, DERECHA, EXTRAE, LARGO, MAYUSC, MINUSC, SUSTITUIR, ENCONTRAR, CONCATENAR, FECHA, HOY, AÑO, MES, DIA, DIAS, PAGO, VNA, Y, O, NO, IFERROR y más (inglés y español).</small></div><div id="excelHead"></div><div class="excel-identity" id="excelIdentity"></div><div id="formulaTools"><label>Celda<input id="celdaActiva" readonly></label><label>Valor / fórmula<input id="formulaInput" placeholder="Valor o fórmula, por ejemplo =SUMA(A1:A5)"></label><button class="mini" id="aplicarFormula">Aplicar</button><button class="mini" id="filaNueva">+ Fila final</button><button class="mini" id="filaBorrar">− Última fila</button><button class="mini" id="columnaNueva">+ Columna final</button><button class="mini" id="columnaBorrar">− Última columna</button></div><div class="tb" id="tb"></div></div></div>
+<div id="modal"><div class="in noprint"><div><button class="mini" id="cerrar">✕ Cerrar</button> <button class="mini" id="imprimirExcel">Imprimir Excel separado / Guardar PDF</button> <b id="mtit"></b> <select id="hojas"></select> <small>Seleccione una celda y edite su valor o fórmula. Funciones disponibles: SUMA, PROMEDIO, MIN, MAX, SI, CONTAR, CONTARA, CONTAR.SI, SUMAR.SI, PROMEDIO.SI, MEDIANA, MODA, DESVEST, REDONDEAR, ABS, ENTERO, POTENCIA, RAIZ, IZQUIERDA, DERECHA, EXTRAE, LARGO, MAYUSC, MINUSC, SUSTITUIR, ENCONTRAR, CONCATENAR, FECHA, HOY, AÑO, MES, DIA, DIAS, PAGO, VNA, Y, O, NO, IFERROR y más (inglés y español).</small></div><div id="excelHead"></div><div class="excel-identity" id="excelIdentity"></div><div id="formulaTools"><label>Celda<input id="celdaActiva" readonly></label><label>Valor / fórmula<input id="formulaInput" placeholder="Valor o fórmula, por ejemplo =SUMA(A1:A5)"></label><button class="mini" id="aplicarFormula">Aplicar</button><button class="mini" id="filaNueva">+ Fila final</button><button class="mini" id="filaBorrar">− Última fila</button><button class="mini" id="columnaNueva">+ Columna final</button><button class="mini" id="columnaBorrar">− Última columna</button></div><div id="paginacionExcel" hidden><button class="mini" id="filasAnteriores">Filas anteriores</button><span id="rangoFilas" aria-live="polite"></span><button class="mini" id="filasSiguientes">Filas siguientes</button></div><div class="tb" id="tb"></div></div></div>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -338,49 +342,107 @@ function abrirDBExpedientes(){
 function operacionExpediente(metodo,accion){
  return abrirDBExpedientes().then(db=>new Promise((resolve,reject)=>{
   const tx=db.transaction("expedientes",metodo),store=tx.objectStore("expedientes"),request=accion(store);
-  request.onsuccess=()=>resolve(request.result);
+  tx.oncomplete=()=>resolve(request.result);
   request.onerror=()=>reject(request.error||new Error("Falló una operación del explorador."));
   tx.onabort=()=>reject(tx.error||new Error("No se pudo guardar el expediente."));
  }));
 }
 const obtenerExpediente=id=>operacionExpediente("readonly",s=>s.get(id));
 const listarExpedientes=()=>operacionExpediente("readonly",s=>s.getAll());
-const guardarExpediente=exp=>operacionExpediente("readwrite",s=>s.put(exp));
+function cambiarExpediente(id,editar){
+ return abrirDBExpedientes().then(db=>new Promise((resolve,reject)=>{
+  const tx=db.transaction("expedientes","readwrite"),store=tx.objectStore("expedientes");
+  const request=store.get(id);
+  let error;
+  request.onsuccess=()=>{
+   try{store.put(editar(request.result))}
+   catch(e){error=e;tx.abort()}
+  };
+  tx.oncomplete=()=>resolve();
+  tx.onabort=()=>reject(error||tx.error||new Error("No se pudo guardar el expediente."));
+ }));
+}
+function nuevoExpediente(id,nombre){
+ return {id,nombre:nombre||id,createdAt:new Date().toISOString(),files:[]};
+}
+const nombresIguales=(a,b)=>a.localeCompare(b,"es",{sensitivity:"accent"})===0;
+const buscarTexto=texto=>String(texto).normalize("NFD").replace(/\p{M}/gu,"").toLowerCase();
+function descargarBlob(blob,nombre){
+ const url=URL.createObjectURL(blob),link=document.createElement("a");
+ link.href=url;link.download=nombre;document.body.appendChild(link);link.click();link.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+function nombreDisponible(nombre,existe){
+ const punto=nombre.lastIndexOf("."),base=punto>0?nombre.slice(0,punto):nombre,ext=punto>0?nombre.slice(punto):"";
+ let candidato=nombre;
+ for(let i=2;existe(candidato);i++)candidato=base+" ("+i+")"+ext;
+ return candidato;
+}
+function registroArchivo(blob,name){
+ return {id:crypto.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2),name,type:blob.type||"application/octet-stream",blob,createdAt:new Date().toISOString()};
+}
 const eliminarExpedienteDb=id=>operacionExpediente("readwrite",s=>s.delete(id));
 function mostrarErrorExplorer(error){
  $("estadoExplorer").className="est err";$("estadoExplorer").textContent=error.message||String(error);
 }
+let versionExplorador=0;
 async function actualizarExplorador(){
  try{
-  const carpetas=await listarExpedientes();
+  const turno=++versionExplorador;
+  const lista=await listarExpedientes();
+  if(turno!==versionExplorador)return;
+  const filtro=buscarTexto($("buscarExpediente").value.trim());
+  const carpetas=lista.filter(c=>buscarTexto((c.nombre||"")+" "+c.id).includes(filtro))
+   .sort((a,b)=>(a.nombre||a.id).localeCompare(b.nombre||b.id,"es",{numeric:true}));
   $("expedientes").innerHTML=carpetas.map(c=>`<div class="expediente-item"><button class="expediente${c.id===EXP_ACTIVO?" active":""}" data-expediente="${esc(c.id)}">📁 ${esc(c.nombre||c.id)}<br><small>${esc(c.id)} · ${(c.files||[]).length} archivos</small></button><button type="button" class="borrar-expediente" title="Eliminar esta carpeta" aria-label="Eliminar carpeta ${esc(c.nombre||c.id)}" data-borrar-expediente="${esc(c.id)}">✕</button></div>`).join("");
-  const activa=EXP_ACTIVO?await obtenerExpediente(EXP_ACTIVO):null;
-  $("exportarCarpeta").disabled=!activa;
+  const activa=lista.find(c=>c.id===EXP_ACTIVO);
   $("borrarExpediente").disabled=!activa;
-  $("archivosExp").innerHTML=activa&&activa.files.length?activa.files.map(f=>`<div class="archivo-exp"><span>${esc(f.name)}</span><button type="button" title="Eliminar archivo" data-borrar-archivo="${esc(f.id)}">✕</button></div>`).join(""):(activa?"<small>Carpeta vacía.</small>":"<small>Seleccione o cree una carpeta.</small>");
+  $("renombrarExpediente").disabled=!activa;
+  $("exportarCarpeta").disabled=!activa?.files?.length;
+  const filtroArchivo=buscarTexto($("buscarArchivo").value.trim());
+  const orden=$("ordenArchivos").value;
+  const archivos=(activa?.files||[]).filter(f=>buscarTexto(f.name).includes(filtroArchivo));
+  archivos.sort((a,b)=>{
+   if(orden==="fecha")return String(b.createdAt||"").localeCompare(a.createdAt||"");
+   if(orden==="tamano")return (b.blob?.size||0)-(a.blob?.size||0);
+   return a.name.localeCompare(b.name,"es",{numeric:true});
+  });
+  $("archivosExp").innerHTML=archivos.length?archivos.map(f=>`<div class="archivo-exp"><span><span>${esc(f.name)}</span><br><small>${Math.ceil((f.blob?.size||0)/1024)} KB</small></span><div>
+   <button type="button" data-archivo="${esc(f.id)}" data-accion="descargar">Descargar</button>
+   <button type="button" data-archivo="${esc(f.id)}" data-accion="renombrar">Renombrar</button>
+   <button type="button" data-archivo="${esc(f.id)}" data-accion="borrar">Eliminar</button>
+   </div></div>`).join(""):(activa?`<small>${filtroArchivo?"Sin resultados.":"Carpeta vacía."}</small>`:"<small>Seleccione o cree una carpeta.</small>");
  }catch(error){mostrarErrorExplorer(error)}
 }
 async function crearAbrirExpediente(){
  const id=norm($("ced").value);
  if(id.length<9){mostrarErrorExplorer(new Error("Digite una cédula válida antes de crear la carpeta."));return false}
  try{
-  let exp=await obtenerExpediente(id);
-  if(!exp)exp={id,nombre:$("nom").value.trim()||id,createdAt:new Date().toISOString(),files:[]};
-  else if($("nom").value.trim())exp.nombre=$("nom").value.trim();
-  await guardarExpediente(exp);EXP_ACTIVO=id;await actualizarExplorador();
+  const nombre=$("nom").value.trim();
+  await cambiarExpediente(id,exp=>exp||nuevoExpediente(id,nombre));
+  EXP_ACTIVO=id;await actualizarExplorador();
   $("estadoExplorer").className="est ok";$("estadoExplorer").textContent="Carpeta activa: "+id;
   return true;
  }catch(error){mostrarErrorExplorer(error);return false}
 }
+async function guardarArchivosExpediente(id,nombre,archivos,reemplazar){
+ await cambiarExpediente(id,exp=>{
+  exp=exp||nuevoExpediente(id,nombre);
+  exp.files=exp.files||[];
+  for(const [blob,nombreArchivo] of archivos){
+   if(reemplazar)exp.files=exp.files.filter(f=>f.name!==nombreArchivo);
+   const disponible=nombreDisponible(nombreArchivo,candidato=>exp.files.some(f=>nombresIguales(f.name,candidato)));
+   exp.files.push(registroArchivo(blob,disponible));
+  }
+  return exp;
+ });
+ EXP_ACTIVO=id;
+ await actualizarExplorador();
+}
 async function guardarArchivoExpediente(archivo,nombre){
  const id=norm($("ced").value)||EXP_ACTIVO;
  if(id.length<9)return false;
- let exp=await obtenerExpediente(id);
- if(!exp)exp={id,nombre:$("nom").value.trim()||id,createdAt:new Date().toISOString(),files:[]};
- exp.files=exp.files||[];
- exp.files=exp.files.filter(f=>f.name!==nombre);
- exp.files.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),name:nombre,type:archivo.type||"application/octet-stream",blob:archivo,createdAt:new Date().toISOString()});
- await guardarExpediente(exp);EXP_ACTIVO=id;await actualizarExplorador();
+ await guardarArchivosExpediente(id,$("nom").value.trim(),[[archivo,nombre]],true);
  return true;
 }
 async function generarPdfDesdeElemento(elemento,nombreArchivo,orientacion){
@@ -397,58 +459,91 @@ async function generarPdfDesdeElemento(elemento,nombreArchivo,orientacion){
   .outputPdf("blob");
  return new Blob([blob],{type:"application/pdf"});
 }
+async function generarPdfExcel(){
+ if(!window.html2pdf)throw new Error("No se pudo cargar el generador de PDF.");
+ const hoja=WBF.Sheets[HOJA_EXCEL],nombre=HOJA_EXCEL;
+ const encabezado=encabezadoExcel(hoja,nombre,false)
+  +`<div class="excel-identity">${esc($("excelIdentity").textContent)}</div>`;
+ const contenedor=document.createElement("div");
+ contenedor.className="excel-pdf-captura";
+ const soporte=document.createElement("div");
+ soporte.style.cssText="position:fixed;top:0;left:-12000px";
+ soporte.append(contenedor);document.body.append(soporte);
+ try{
+  let pdf,bloque=0,tabla;
+  do{
+   tabla=hoja["!ref"]?tablaExcel(hoja,false,"pdf",bloque):"";
+   if(!tabla&&bloque)break;
+   contenedor.innerHTML=encabezado+tabla;
+   let worker=html2pdf().set({
+    margin:0.2,image:{type:"jpeg",quality:0.95},
+    html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
+    jsPDF:{unit:"in",format:"letter",orientation:"landscape"},
+    pagebreak:{mode:[],avoid:"tr"}
+   }).from(contenedor);
+   if(pdf){pdf.addPage();worker=worker.set({pdf})}
+   pdf=await worker.toPdf().get("pdf");
+   bloque++;
+  }while(tabla);
+  return pdf.output("blob");
+ }finally{soporte.remove()}
+}
 async function guardarPdfsExpediente(incluirExcel){
- const creada=await crearAbrirExpediente();
- if(!creada)throw new Error("No se pudo crear la carpeta del expediente.");
- const archivos=[];
- const pdfOficio=await generarPdfDesdeElemento(document.querySelector(".page"),nombreSalida()+".pdf","portrait");
- archivos.push([pdfOficio,nombreSalida()+".pdf"]);
- if(incluirExcel&&WBF){
-  const estabaOculto=document.body.classList.contains("excel-only");
-  document.body.classList.add("excel-only");
-  try{
-   const pdfExcel=await generarPdfDesdeElemento($("excelPrint"),nombreSalida()+"_Excel.pdf","landscape");
-   archivos.push([pdfExcel,nombreSalida()+"_Excel.pdf"]);
-  }finally{
-   if(!estabaOculto)document.body.classList.remove("excel-only");
-  }
- }
- for(const [archivo,nombre]of archivos)await guardarArchivoExpediente(archivo,nombre);
+ const id=norm($("ced").value),nombre=$("nom").value.trim(),salida=nombreSalida();
+ if(id.length<9)throw new Error("Digite una cédula válida antes de guardar el expediente.");
+ const archivos=[[await generarPdfDesdeElemento(document.querySelector(".page"),salida+".pdf","portrait"),salida+".pdf"]];
+ if(incluirExcel&&WBF)archivos.push([await generarPdfExcel(),salida+"_Excel.pdf"]);
+ await guardarArchivosExpediente(id,nombre,archivos,true);
  return archivos.length;
 }
 async function guardarPdfExcelExpediente(){
- const creada=await crearAbrirExpediente();
- if(!creada)throw new Error("No se pudo crear la carpeta del expediente.");
- const estabaOculto=document.body.classList.contains("excel-only");
- document.body.classList.add("excel-only");
- try{
-  const pdf=await generarPdfDesdeElemento($("excelPrint"),nombreSalida()+"_Excel.pdf","landscape");
-  await guardarArchivoExpediente(pdf,nombreSalida()+"_Excel.pdf");
-  return 1;
- }finally{
-  if(!estabaOculto)document.body.classList.remove("excel-only");
- }
+ const id=norm($("ced").value),nombre=$("nom").value.trim(),salida=nombreSalida()+"_Excel.pdf";
+ if(id.length<9)throw new Error("Digite una cédula válida antes de guardar el expediente.");
+ await guardarArchivosExpediente(id,nombre,[[await generarPdfExcel(),salida]],true);
 }
 $("crearCarpeta").addEventListener("click",crearAbrirExpediente);
+function destinoAdjuntos(){
+ return EXP_ACTIVO||norm($("ced").value);
+}
+async function adjuntarArchivos(id,files){
+ if(!files.length)return;
+ if(id.length<9){mostrarErrorExplorer(new Error("Seleccione una carpeta o digite una cédula válida."));return}
+ try{
+  const nombre=id===norm($("ced").value)?$("nom").value.trim():"";
+  await guardarArchivosExpediente(id,nombre,files.map(file=>[file,file.name]),false);
+  $("estadoExplorer").className="est ok";$("estadoExplorer").textContent=files.length+" archivo(s) agregados a "+id+".";
+ }catch(error){mostrarErrorExplorer(error)}
+}
 $("agregarArchivos").addEventListener("click",()=>{
- const id=norm($("ced").value);
- if(id.length<9){mostrarErrorExplorer(new Error("Digite una cédula válida antes de agregar archivos."));return}
+ const id=destinoAdjuntos();
+ if(id.length<9){mostrarErrorExplorer(new Error("Seleccione una carpeta o digite una cédula válida."));return}
  EXP_PENDIENTE=id;$("archivosExpInput").click();
 });
-$("archivosExpInput").addEventListener("change",async e=>{
- const files=Array.from(e.target.files||[]),id=EXP_PENDIENTE||norm($("ced").value);EXP_PENDIENTE="";
+$("archivosExpInput").addEventListener("change",e=>{
+ const files=Array.from(e.target.files||[]),id=EXP_PENDIENTE||destinoAdjuntos();
+ EXP_PENDIENTE="";e.target.value="";
+ adjuntarArchivos(id,files);
+});
+$("explorer").addEventListener("dragover",e=>{
+ if(e.dataTransfer.types.includes("Files")){e.preventDefault();e.dataTransfer.dropEffect="copy"}
+});
+$("explorer").addEventListener("drop",e=>{
+ const files=Array.from(e.dataTransfer.files);
  if(!files.length)return;
+ e.preventDefault();adjuntarArchivos(destinoAdjuntos(),files);
+});
+$("buscarExpediente").addEventListener("input",actualizarExplorador);
+$("buscarArchivo").addEventListener("input",actualizarExplorador);
+$("ordenArchivos").addEventListener("change",actualizarExplorador);
+$("renombrarExpediente").addEventListener("click",async()=>{
+ const id=EXP_ACTIVO;
  try{
-  let exp=await obtenerExpediente(id);
-  if(!exp)exp={id,nombre:$("nom").value.trim()||id,createdAt:new Date().toISOString(),files:[]};
-  for(const file of files){
-   exp.files=exp.files.filter(saved=>saved.name!==file.name);
-   exp.files.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),name:file.name,type:file.type||"application/octet-stream",blob:file,createdAt:new Date().toISOString()});
-  }
-  await guardarExpediente(exp);EXP_ACTIVO=id;await actualizarExplorador();
-  $("estadoExplorer").className="est ok";$("estadoExplorer").textContent=files.length+" archivo(s) agregados.";
+  const exp=await obtenerExpediente(id);if(!exp)return;
+  const nombre=prompt("Nombre de la carpeta",exp.nombre||id)?.trim();
+  if(!nombre)return;
+  await cambiarExpediente(id,actual=>{if(!actual)throw new Error("El expediente ya no existe.");return {...actual,nombre}});
+  await actualizarExplorador();
  }catch(error){mostrarErrorExplorer(error)}
- e.target.value="";
 });
 $("expedientes").addEventListener("click",async e=>{
  const borrar=e.target.closest("[data-borrar-expediente]");
@@ -460,10 +555,29 @@ $("expedientes").addEventListener("click",async e=>{
  EXP_ACTIVO=button.dataset.expediente;await actualizarExplorador();
 });
 $("archivosExp").addEventListener("click",async e=>{
- const button=e.target.closest("[data-borrar-archivo]");if(!button||!EXP_ACTIVO)return;
- if(!confirm("¿Eliminar este archivo de la carpeta?"))return;
- try{const exp=await obtenerExpediente(EXP_ACTIVO);exp.files=exp.files.filter(f=>f.id!==button.dataset.borrarArchivo);await guardarExpediente(exp);await actualizarExplorador()}
- catch(error){mostrarErrorExplorer(error)}
+ const button=e.target.closest("[data-archivo]"),id=EXP_ACTIVO;
+ if(!button||!id)return;
+ const archivoId=button.dataset.archivo,accion=button.dataset.accion;
+ try{
+  const exp=await obtenerExpediente(id),archivo=exp?.files?.find(f=>f.id===archivoId);
+  if(!archivo)throw new Error("El archivo ya no existe.");
+  if(accion==="descargar"){descargarBlob(archivo.blob,archivo.name);return}
+  const nuevo=accion==="renombrar"?prompt("Nombre del archivo",archivo.name)?.trim():null;
+  if(accion==="renombrar"&&!nuevo)return;
+  if(accion==="borrar"&&!confirm("¿Eliminar este archivo de la carpeta?"))return;
+  if(nuevo&&(/[\/\\\u0000-\u001f]/.test(nuevo)||nuevo==="."||nuevo===".."))throw new Error("Digite un nombre de archivo válido.");
+  await cambiarExpediente(id,actual=>{
+   const file=actual?.files?.find(f=>f.id===archivoId);
+   if(!file)throw new Error("El archivo ya no existe.");
+   if(accion==="borrar")actual.files=actual.files.filter(f=>f.id!==archivoId);
+   else{
+    if(actual.files.some(f=>f.id!==archivoId&&nombresIguales(f.name,nuevo)))throw new Error("Ya existe un archivo con ese nombre.");
+    file.name=nuevo;
+   }
+   return actual;
+  });
+  await actualizarExplorador();
+ }catch(error){mostrarErrorExplorer(error)}
 });
 async function confirmarEliminarExpediente(id){
  if(!id)return;
@@ -493,10 +607,14 @@ $("exportarCarpeta").addEventListener("click",async()=>{
   if(!window.JSZip)throw new Error("No se pudo cargar el creador de ZIP. Revise la conexión e intente de nuevo.");
   const exp=await obtenerExpediente(EXP_ACTIVO);if(!exp)throw new Error("La carpeta seleccionada ya no existe.");
   const zip=new JSZip(),folder=zip.folder(nombreArchivoSeguro(exp.nombre)+"_"+nombreArchivoSeguro(exp.id));
-  for(const file of exp.files||[])folder.file(nombreArchivoSeguro(file.name),file.blob);
+  const usados=new Set();
+  for(const file of exp.files||[]){
+   const nombre=nombreDisponible(nombreArchivoSeguro(file.name).replace(/^\.{1,2}$/,"sin_datos"),candidato=>usados.has(candidato.toLowerCase()));
+   usados.add(nombre.toLowerCase());folder.file(nombre,file.blob);
+  }
   if(!(exp.files||[]).length)throw new Error("La carpeta no contiene archivos PDF o adjuntos para exportar.");
   const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE"});
-  const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download=nombreArchivoSeguro(exp.nombre)+"_"+nombreArchivoSeguro(exp.id)+".zip";document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),2000);
+  descargarBlob(blob,nombreArchivoSeguro(exp.nombre)+"_"+nombreArchivoSeguro(exp.id)+".zip");
   $("estadoExplorer").className="est ok";$("estadoExplorer").textContent="ZIP descargado.";
  }catch(error){mostrarErrorExplorer(error)}
 });
@@ -520,7 +638,9 @@ setInterval(()=>{if(!MANUAL)fecha()},30000);
 
 /* ---- Excel editable, asociado al contribuyente y anexo de impresión ---- */
 let WBF=null,WB_SOURCE=null,HOJA_EXCEL="",WB_NAME="",EXCEL_ID="",CELDA_ACTIVA="";
-const CELDAS_MODIFICADAS=new Set();
+const CELDAS_MODIFICADAS=new Set(),CELDAS_EDITADAS=new Set();
+const FILAS_POR_VISTA=100;
+let paginaExcel=0;
 const ESTRUCTURA_MODIFICADA=[];
 function valorCelda(celda){
  if(!celda)return "";
@@ -555,8 +675,6 @@ function actualizarExcelCliente(){
  $("excelIdentity").textContent=mismatch
   ?"⚠ La cédula del Excel ("+idLibro+") no coincide con la del oficio ("+idOficio+"). Corrija la asociación antes de imprimir."
   :"Contribuyente asociado: "+(nombre||"sin nombre")+" ("+(idOficio||idLibro||"sin cédula")+")";
- const identidadImpresion=$("printExcelIdentity");
- if(identidadImpresion)identidadImpresion.textContent=$("excelIdentity").textContent;
  return mismatch;
 }
 function vincularExcel(){
@@ -609,19 +727,30 @@ function encabezadoExcel(ws,nombreHoja,editable){
  const logo=OFICIOS.img.logo,escudo=OFICIOS.img.esc;
  return `<div class="excel-brand" style="${estiloA1}"><img src="${esc(logo)}" alt="Pococí fluye"><div class="excel-title"${ce}>${esc(municipalidad)}</div><img src="${esc(escudo)}" alt="Escudo municipal"></div><div class="excel-subtitle" style="${estiloA2}"${ce2}>${esc(subtitulo)}</div>`;
 }
-function tablaExcel(ws,editable,imprimir){
+function tablaExcel(ws,editable,imprimir,bloque=0){
  const ref=ws["!ref"];if(!ref)return "<p>Hoja vacía</p>";
  const r=XLSX.utils.decode_range(ref),tituloEnEncabezado=/Municipalidad/i.test(textoCelda(ws,"A1"));
- const start=tituloEnEncabezado?Math.min(r.e.r,r.s.r+2):r.s.r;
- const end=Math.min(r.e.r,r.s.r+499),cols=ws["!cols"]||[];
+ const primera=tituloEnEncabezado?Math.min(r.e.r,r.s.r+2):r.s.r;
+ if(editable)paginaExcel=Math.min(paginaExcel,Math.floor((r.e.r-primera)/FILAS_POR_VISTA));
+ const start=primera+(editable?paginaExcel:bloque)*FILAS_POR_VISTA;
+ const end=editable||imprimir==="pdf"?Math.min(r.e.r,start+FILAS_POR_VISTA-1):r.e.r,cols=ws["!cols"]||[];
+ if(editable){
+  $("paginacionExcel").hidden=r.e.r-primera<FILAS_POR_VISTA;
+  $("filasAnteriores").disabled=paginaExcel===0;
+  $("filasSiguientes").disabled=end===r.e.r;
+  $("rangoFilas").textContent=`Filas ${start+1}–${end+1} de ${r.e.r+1}`;
+ }
  const merges=ws["!merges"]||[],mergeStarts=new Map(),mergeCovered=new Set();
  for(const merge of merges){
-  const key=XLSX.utils.encode_cell(merge.s),colspan=merge.e.c-merge.s.c+1,rowspan=merge.e.r-merge.s.r+1;
-  mergeStarts.set(key,{colspan,rowspan});
-  for(let row=merge.s.r;row<=merge.e.r;row++)for(let col=merge.s.c;col<=merge.e.c;col++){
-   if(row!==merge.s.r||col!==merge.s.c)mergeCovered.add(XLSX.utils.encode_cell({r:row,c:col}));
+  const fila=Math.max(start,merge.s.r),ultima=Math.min(end,merge.e.r);
+  if(fila>ultima)continue;
+  const key=XLSX.utils.encode_cell({r:fila,c:merge.s.c}),colspan=merge.e.c-merge.s.c+1,rowspan=ultima-fila+1;
+  mergeStarts.set(key,{colspan,rowspan,address:XLSX.utils.encode_cell(merge.s)});
+  for(let row=fila;row<=ultima;row++)for(let col=merge.s.c;col<=merge.e.c;col++){
+   if(row!==fila||col!==merge.s.c)mergeCovered.add(XLSX.utils.encode_cell({r:row,c:col}));
   }
  }
+ if(start>r.e.r)return "";
  const widths=[];
  for(let c=r.s.c;c<=r.e.c;c++){
   const info=cols[c]||{},px=info.wpx||Math.round((info.wch||12)*7);
@@ -638,18 +767,18 @@ function tablaExcel(ws,editable,imprimir){
   const height=rows[row]&&rows[row].hpt?` style="height:${rows[row].hpt}pt"`:"";
   html+=`<tr class="${isHeader?"sheet-header":""}"${height}><th class="row-number">${row+1}</th>`;
   for(let col=r.s.c;col<=r.e.c;col++){
-   const address=XLSX.utils.encode_cell({r:row,c:col}),cell=ws[address],formula=!!(cell&&cell.f);
-   if(mergeCovered.has(address))continue;
+   const posicion=XLSX.utils.encode_cell({r:row,c:col});
+   if(mergeCovered.has(posicion))continue;
+   const merge=mergeStarts.get(posicion),address=merge?.address||posicion,cell=ws[address],formula=!!cell?.f;
    const title=formula?` title="=${esc(cell.f)}"`:"";
    const edit=editable?' contenteditable="true" spellcheck="false" data-cell="'+address+'"':"";
-   const merge=mergeStarts.get(address),span=(merge?` colspan="${merge.colspan}" rowspan="${merge.rowspan}"`:"");
+   const span=(merge?` colspan="${merge.colspan}" rowspan="${merge.rowspan}"`:"");
    const style=imprimir?estiloCeldaExcel(cell):"";
    html+=`<td class="${formula&&!imprimir?"formula":""}"${title}${span}${style?` style="${style}"`:""}${edit}>${esc(valorCelda(cell))}</td>`;
   }
   html+="</tr>";
  }
  html+="</tbody></table>";
- if(r.e.r>r.s.r+499)html+="<p>Se muestran las primeras 500 filas.</p>";
  return html;
 }
 function hoja(n){
@@ -657,17 +786,15 @@ function hoja(n){
  const ws=WBF.Sheets[n];
  $("mtit").textContent=WB_NAME||"Excel cargado";
  $("excelHead").innerHTML=encabezadoExcel(ws,n,true);
+ $("paginacionExcel").hidden=true;
  $("tb").innerHTML=tablaExcel(ws,true);
  if(ws["!ref"]){
   const range=XLSX.utils.decode_range(ws["!ref"]);
   const inicio=/Municipalidad/i.test(textoCelda(ws,"A1"))?Math.min(range.e.r,range.s.r+2):range.s.r;
-  if(!CELDA_ACTIVA||!ws[CELDA_ACTIVA])CELDA_ACTIVA=XLSX.utils.encode_cell({r:inicio,c:range.s.c});
+  if(!CELDA_ACTIVA)CELDA_ACTIVA=$("tb").querySelector("[data-cell]")?.dataset.cell||XLSX.utils.encode_cell({r:inicio,c:range.s.c});
   seleccionarCelda(CELDA_ACTIVA);
  }
  const mismatch=actualizarExcelCliente();
- $("excelPrint").innerHTML=encabezadoExcel(ws,n,false)
-  +`<div class="excel-identity" id="printExcelIdentity">${esc($("excelIdentity").textContent)}</div>`
-  +tablaExcel(ws,false,true);
  if(mismatch)$("est").textContent=$("excelIdentity").textContent;
 }
 function seleccionarCelda(address){
@@ -762,8 +889,13 @@ function ejecutarFuncion(name,args,ws){
    if(op==="<")return val<c2;return val==c2;
   }
   if(typeof crit==="number")return val===crit;
-  const pat=new RegExp("^"+cs.replace(/\*/g,".*").replace(/\?/g,".")+"$","i");
-  return pat.test(String(val));
+  const escapar=fragmento=>fragmento.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const patron=cs.match(/~[~*?]|\*+|[\s\S]/g)?.map(token=>{
+   if(token[0]==="*")return ".*";
+   if(token==="?")return ".";
+   return escapar(token.length>1?token[1]:token);
+  }).join("")||"";
+  return new RegExp("^"+patron+"$","is").test(String(val));
  }
  /* Helper: extraer rango plano desde arg (array o escalar) */
  const flatArg=a=>Array.isArray(a)?a.flat(Infinity):[a];
@@ -813,15 +945,15 @@ function ejecutarFuncion(name,args,ws){
    return isFinite(mx)?mx:0;
   }
   case "ABS":return Math.abs(toN(args[0]));
-  case "ROUND":case "REDONDEAR":{const f=10**toN(args[1]||0);return Math.round(toN(args[0])*f)/f}
-  case "ROUNDUP":case "REDONDEAR.MAS":{const f=10**toN(args[1]||0);return Math.ceil(toN(args[0])*f)/f}
-  case "ROUNDDOWN":case "REDONDEAR.MENOS":{const f=10**toN(args[1]||0);return Math.floor(toN(args[0])*f)/f}
+  case "ROUND":case "REDONDEAR":{const f=10**toN(args[1]||0);const n=toN(args[0]);return Math.sign(n)*Math.round(Math.abs(n)*f)/f}
+  case "ROUNDUP":case "REDONDEAR.MAS":{const f=10**toN(args[1]||0);const n=toN(args[0]);return Math.sign(n)*Math.ceil(Math.abs(n)*f)/f}
+  case "ROUNDDOWN":case "REDONDEAR.MENOS":{const f=10**toN(args[1]||0);return Math.trunc(toN(args[0])*f)/f}
   case "CEILING":case "MULTIPLO.SUPERIOR":{const s=toN(args[1]||1);return s?Math.ceil(toN(args[0])/s)*s:0}
   case "FLOOR":case "MULTIPLO.INFERIOR":{const s=toN(args[1]||1);return s?Math.floor(toN(args[0])/s)*s:0}
   case "MROUND":case "REDOND.MULT":{const s=toN(args[1]||1);return s?Math.round(toN(args[0])/s)*s:0}
   case "INT":case "ENTERO":return Math.floor(toN(args[0]));
   case "TRUNC":case "TRUNCAR":{const f=10**toN(args[1]||0);return Math.trunc(toN(args[0])*f)/f}
-  case "MOD":case "RESIDUO":{const d=toN(args[1]);return d?toN(args[0])%d:0}
+  case "MOD":case "RESIDUO":{const d=toN(args[1]);const n=toN(args[0]);return d?n-d*Math.floor(n/d):null}
   case "POWER":case "POTENCIA":return Math.pow(toN(args[0]),toN(args[1]));
   case "SQRT":case "RAIZ":return Math.sqrt(toN(args[0]));
   case "SQRTPI":return Math.sqrt(Math.PI*toN(args[0]));
@@ -1138,7 +1270,7 @@ function recalcularHoja(ws){
   if(!cambio)break;
  }
 }
-function guardarValorCelda(address,raw){
+function escribirValorCelda(address,raw){
  const ws=WBF.Sheets[HOJA_EXCEL];
  let cell=ws[address]||{t:"s",v:""};
  if(raw.startsWith("=")){
@@ -1146,12 +1278,22 @@ function guardarValorCelda(address,raw){
  }else{
   delete cell.f;
   if(raw==="" ){cell.v="";cell.t="s"}
-  else if((cell.t==="n"||!ws[address])&&/^[+-]?\d+(?:\.\d+)?$/.test(raw)){cell.v=Number(raw);cell.t="n"}
+  else if(raw.startsWith("'")){cell.v=raw.slice(1);cell.t="s"}
+  else if(/^[+-]?(?:0|[1-9]\d*)(?:[.,]\d+)?(?:[eE][+-]?\d+)?$/.test(raw)&&Number.isFinite(Number(raw.replace(",",".")))){cell.v=Number(raw.replace(",","."));cell.t="n"}
   else{cell.v=raw;cell.t="s"}
   delete cell.w;
   try{cell.w=XLSX.utils.format_cell(cell)}catch(e){}
  }
- ws[address]=cell;CELDAS_MODIFICADAS.add(HOJA_EXCEL+"!"+address);
+ delete cell.F;delete cell.D;
+ ws[address]=cell;
+ const clave=HOJA_EXCEL+"!"+address;
+ CELDAS_MODIFICADAS.add(clave);CELDAS_EDITADAS.add(clave);
+ return cell;
+}
+function guardarValorCelda(address,raw){
+ const ws=WBF.Sheets[HOJA_EXCEL],previa=ws[address];
+ if((previa?.f?"="+previa.f:String(previa?.v??""))===raw)return;
+ const cell=escribirValorCelda(address,raw);
  const resultado=cell.f?evaluarFormula(cell.f,ws):undefined;
  recalcularHoja(ws);hoja(HOJA_EXCEL);
  if(cell.f&&resultado===null){
@@ -1215,7 +1357,7 @@ function eliminarUltimaEstructura(tipo){
  for(const address of Array.from(CELDAS_MODIFICADAS)){
   if(!address.startsWith(HOJA_EXCEL+"!"))continue;
   const cellAddress=address.slice(HOJA_EXCEL.length+1),coord=XLSX.utils.decode_cell(cellAddress);
-  if(fila?coord.r===indice:coord.c===indice)CELDAS_MODIFICADAS.delete(address);
+  if(fila?coord.r===indice:coord.c===indice){CELDAS_MODIFICADAS.delete(address);CELDAS_EDITADAS.delete(address)}
  }
  ESTRUCTURA_MODIFICADA.push({sheet:HOJA_EXCEL,type:fila?"row":"column",action:"delete",index:indice+1});
  CELDA_ACTIVA="";
@@ -1276,22 +1418,17 @@ function normalizarFormulaExcel(formula){
   DIAS:"DAYS","DIAS.LAB":"NETWORKDAYS","DIA.LAB":"WORKDAY","FIN.MES":"EOMONTH","FECHA.MES":"EDATE",DATEDIF:"DATEDIF",
   PAGO:"PMT",VA:"PV",VF:"FV",VNA:"NPV",SUMAPRODUCTO:"SUMPRODUCT","SUMA.CUADRADOS":"SUMSQ",
   SENO:"SIN",ASENO:"ASIN",GRADOS:"DEGREES",RADIANES:"RADIANS",SIGNO:"SIGN",ALEATORIO:"RAND","ALEATORIO.ENTRE":"RANDBETWEEN",
-  ELEGIR:"CHOOSE","MIN.SI.CONJUNTO":"MINIFS","MAX.SI.CONJUNTO":"MAXIFS",BUSCARV:"VLOOKUP",BUSCARH:"HLOOKUP",INDICE:"INDEX",COINCIDIR:"MATCH",DESREF:"OFFSET",
+  ELEGIR:"CHOOSE","MIN.SI.CONJUNTO":"MINIFS","MAX.SI.CONJUNTO":"MAXIFS",BUSCARV:"VLOOKUP",BUSCARH:"HLOOKUP",BUSCARX:"_xlfn.XLOOKUP",XLOOKUP:"_xlfn.XLOOKUP",INDICE:"INDEX",COINCIDIR:"MATCH",DESREF:"OFFSET",
   COMBINAT:"COMBIN",MCD:"GCD",MCM:"LCM",TIPO:"TYPE",FILA:"ROW",COLUMNA:"COLUMN",FILAS:"ROWS",COLUMNAS:"COLUMNS",SECUENCIA:"SEQUENCE",ORDENAR:"SORT"
  };
- let salida="",comillas=false;
- for(let i=0;i<formula.length;i++){
-  const caracter=formula[i];
-  if(caracter==='"'){
-   salida+=caracter;
-   if(comillas&&formula[i+1]==='"'){salida+='"';i++}
-   else comillas=!comillas;
-  }else if(!comillas&&caracter===";")salida+=",";
-  else salida+=caracter;
- }
- return salida.replace(/\b([A-ZÁÉÍÓÚÑ][A-Z0-9_.]*)\s*(?=\()/gi,n=>{const up=n.toUpperCase();return nombres[up]||n});
+ const tokens=/"(?:[^"]|"")*"|'(?:[^']|'')*'|\[[^\]]*\]|[A-ZÁÉÍÓÚÑ_][A-Z0-9ÁÉÍÓÚÑ_.]*|;/gi;
+ return formula.replace(tokens,(token,pos)=>{
+  if(token===";")return ",";
+  if(/^\s*\(/.test(formula.slice(pos+token.length))&&Object.hasOwn(nombres,token.toUpperCase()))return nombres[token.toUpperCase()];
+  return token;
+ });
 }
-function escribirCeldaXml(doc,sheetData,address,source){
+function escribirCeldaXml(doc,sheetData,address,source,editada){
  const coord=XLSX.utils.decode_cell(address),numeroFila=coord.r+1;
  const fila=obtenerFilaXml(doc,sheetData,numeroFila),ns="http://schemas.openxmlformats.org/spreadsheetml/2006/main";
  let cell=Array.from(fila.children).find(e=>e.localName==="c"&&e.getAttribute("r")===address);
@@ -1299,10 +1436,12 @@ function escribirCeldaXml(doc,sheetData,address,source){
   const col=coord.c,siguiente=Array.from(fila.children).find(e=>e.localName==="c"&&XLSX.utils.decode_cell(e.getAttribute("r")).c>col);
   fila.insertBefore(cell,siguiente||null);
  }
- Array.from(cell.children).forEach(e=>{if(["f","v","is"].includes(e.localName))cell.removeChild(e)});
+ const original=Array.from(cell.children).find(e=>e.localName==="f");
+ const conservarFormula=!editada&&source?.f&&original;
+ Array.from(cell.children).forEach(e=>{if(["f","v","is"].includes(e.localName)&&e!==conservarFormula)cell.removeChild(e)});
  cell.removeAttribute("t");
  if(source&&source.f){
-  const formula=doc.createElementNS(ns,"f");formula.textContent=normalizarFormulaExcel(String(source.f).replace(/^=/,""));cell.appendChild(formula);
+  if(!conservarFormula){const formula=doc.createElementNS(ns,"f");formula.textContent=normalizarFormulaExcel(String(source.f).replace(/^=/,""));cell.appendChild(formula)}
   if(source.v!==undefined&&source.v!==null){
    const value=doc.createElementNS(ns,"v");value.textContent=String(source.v);cell.appendChild(value);
    if(typeof source.v==="string")cell.setAttribute("t","str");
@@ -1363,7 +1502,7 @@ async function descargarLibro(){
   }
   for(const clave of CELDAS_MODIFICADAS){
    const separador=clave.lastIndexOf("!");if(clave.slice(0,separador)!==sheetName)continue;
-   const address=clave.slice(separador+1);escribirCeldaXml(doc,sheetData,address,ws[address]);
+   const address=clave.slice(separador+1);escribirCeldaXml(doc,sheetData,address,ws[address],CELDAS_EDITADAS.has(clave));
   }
   const dimension=doc.getElementsByTagNameNS("*","dimension")[0];
   if(ws["!ref"]){
@@ -1387,9 +1526,7 @@ async function descargarLibro(){
  const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
  const nombreExcel=nombreSalida()+"_Excel.xlsx";
  try{await guardarArchivoExpediente(blob,nombreExcel)}catch(error){mostrarErrorExplorer(error)}
- const url=URL.createObjectURL(blob),a=document.createElement("a");
- a.href=url;a.download=nombreExcel;document.body.appendChild(a);a.click();a.remove();
- setTimeout(()=>URL.revokeObjectURL(url),2000);
+ descargarBlob(blob,nombreExcel);
  $("descargarExcel").hidden=false;
  $("est").className="est ok";$("est").textContent="✓ Excel asociado descargado.";
 }
@@ -1401,7 +1538,7 @@ $("archivoF").addEventListener("change",e=>{
  reader.onload=()=>{
   try{
    WB_SOURCE=reader.result.slice(0);WBF=XLSX.read(WB_SOURCE,{type:"array",cellFormula:true,cellStyles:true});WB_NAME=file.name;
-   CELDAS_MODIFICADAS.clear();ESTRUCTURA_MODIFICADA.length=0;CELDA_ACTIVA="";$("descargarExcel").hidden=true;
+   CELDAS_MODIFICADAS.clear();CELDAS_EDITADAS.clear();paginaExcel=0;ESTRUCTURA_MODIFICADA.length=0;CELDA_ACTIVA="";$("descargarExcel").hidden=false;
    $("mtit").textContent=file.name;
    $("hojas").innerHTML=WBF.SheetNames.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("");
    HOJA_EXCEL=WBF.SheetNames[0];vincularExcel();hoja(HOJA_EXCEL);$("modal").style.display="block";
@@ -1421,14 +1558,22 @@ $("filaNueva").addEventListener("click",()=>WBF?agregarEstructura("row"):null);
 $("columnaNueva").addEventListener("click",()=>WBF?agregarEstructura("column"):null);
 $("filaBorrar").addEventListener("click",()=>WBF?eliminarUltimaEstructura("row"):null);
 $("columnaBorrar").addEventListener("click",()=>WBF?eliminarUltimaEstructura("column"):null);
-$("hojas").addEventListener("change",e=>{HOJA_EXCEL=e.target.value;vincularExcel();hoja(HOJA_EXCEL)});
+$("hojas").addEventListener("change",e=>{HOJA_EXCEL=e.target.value;paginaExcel=0;CELDA_ACTIVA="";vincularExcel();hoja(HOJA_EXCEL)});
+function cambiarPaginaExcel(delta){
+ paginaExcel+=delta;CELDA_ACTIVA="";hoja(HOJA_EXCEL);
+}
+$("filasAnteriores").addEventListener("click",()=>cambiarPaginaExcel(-1));
+$("filasSiguientes").addEventListener("click",()=>cambiarPaginaExcel(1));
 $("cerrar").addEventListener("click",()=>$("modal").style.display="none");
 $("descargarExcel").addEventListener("click",()=>descargarLibro().catch(error=>{$("est").className="est err";$("est").textContent="No se pudo generar el Excel: "+error.message}));
 function imprimirExcelSeparado(reabrirEditor,descargarDespues){
  const titulo=document.title;document.title=nombreSalida()+"_Excel";
+ $("excelPrint").innerHTML=encabezadoExcel(WBF.Sheets[HOJA_EXCEL],HOJA_EXCEL,false)
+  +`<div class="excel-identity">${esc($("excelIdentity").textContent)}</div>`
+  +tablaExcel(WBF.Sheets[HOJA_EXCEL],false,true);
  $("modal").style.display="none";document.body.classList.add("excel-only");
  window.addEventListener("afterprint",()=>{
-  document.body.classList.remove("excel-only");document.title=titulo;
+  document.body.classList.remove("excel-only");$("excelPrint").replaceChildren();document.title=titulo;
   if(reabrirEditor)$("modal").style.display="block";
   if(descargarDespues)descargarLibro().catch(error=>{
    $("descargarExcel").hidden=false;$("est").className="est err";
@@ -1469,5 +1614,6 @@ $("imprimir").addEventListener("click",()=>{
 });
 cargarPlantilla();fecha();cargarBase(false);
 </script>
+<script src="mejoras_excel.js"></script>
 </body>
 </html>

@@ -5,15 +5,16 @@
 "use strict";
 const ERR=c=>({__err:c});
 const isErr=v=>!!v&&typeof v==="object"&&!Array.isArray(v)&&v.__err!==undefined;
+const CODIGOS={"#NULL!":0,"#DIV/0!":7,"#VALUE!":15,"#REF!":23,"#NAME?":29,"#NUM!":36,"#N/A":42};
 const ERRS=/^#(DIV\/0!|N\/A|VALUE!|REF!|NAME\?|NUM!|NULL!)$/;
 const ORIG=window.ejecutarFuncion;
-const LAZY=new Set(["IFERROR","SI.ERROR","IFNA","SI.ND","ISERROR","ESERROR","ISNA","IF","SI","IFS","SI.CONJUNTO","SWITCH","ELEGIR.V","CHOOSE","ELEGIR"]);
+const LAZY=new Set(["IFERROR","SI.ERROR","IFNA","SI.ND","ISERROR","ESERROR","ISNA","ESND","IF","SI","IFS","SI.CONJUNTO","SWITCH","ELEGIR.V","CHOOSE","ELEGIR"]);
 
 /* ---------- valores ---------- */
 function celdaVal(sh,a){
  const c=sh[a];
  if(!c||c.v===undefined||c.v===null||c.v==="")return "";
- if(c.t==="e"||(typeof c.v==="string"&&ERRS.test(c.v)))return ERR(c.w&&ERRS.test(c.w)?c.w:(ERRS.test(c.v)?c.v:"#VALUE!"));
+ if(c.t==="e")return ERR(c.w&&ERRS.test(c.w)?c.w:Object.keys(CODIGOS).find(k=>CODIGOS[k]===c.v)||"#VALUE!");
  if(c.f&&c.t==="s"&&(c.v==="TRUE"||c.v==="FALSE"))return c.v==="TRUE";
  return c.v;
 }
@@ -32,6 +33,8 @@ function cmp(a,b){
  if(Array.isArray(a))a=a[0];if(Array.isArray(b))b=b[0];
  if(isErr(a))return a;if(isErr(b))return b;
  if(a===""&&typeof b==="number")a=0;if(b===""&&typeof a==="number")b=0;
+ const rango=v=>typeof v==="number"?0:typeof v==="string"?1:2;
+ if(rango(a)!==rango(b))return rango(a)-rango(b);
  if(typeof a==="string"&&typeof b==="string"){a=a.toLowerCase();b=b.toLowerCase()}
  return a<b?-1:a>b?1:0;
 }
@@ -91,6 +94,7 @@ function llamar(name,args,ws){
   }
  }
  const r=ORIG(name,A,ws);
+ if(r===null&&["AVERAGE","PROMEDIO","AVERAGEIF","PROMEDIO.SI","MOD","RESIDUO"].includes(name))return ERR("#DIV/0!");
  if(r===null||r===undefined)throw new Error("Función no soportada: "+name);
  if(typeof r==="number"&&!Number.isFinite(r))return ERR("#NUM!");
  return r;
@@ -134,7 +138,7 @@ function evaluar(formula,ws){
   if(CELL.test(t))return ref(ws);
   if(/^\d/.test(t)){i++;return Number(t)}
   if(/^[A-Z_À-ÿ]/i.test(t)){
-   i++;const name=t.toUpperCase();
+   i++;const name=t.toUpperCase().replace(/^_XLFN\.(?:_XLWS\.)?/,"");
    if(tk[i]!=="("){
     if(name==="TRUE"||name==="VERDADERO")return true;
     if(name==="FALSE"||name==="FALSO")return false;
@@ -170,9 +174,9 @@ window.evaluarFormula=evaluar;
 function aplicar(cell,val,hoja,addr){
  let v=Array.isArray(val)?val[0]:val,t,nv;
  if(v===undefined)v="";
- if(isErr(v)){t="s";nv=v.__err}
- else if(typeof v==="number"){if(Number.isFinite(v)){t="n";nv=v}else{t="s";nv="#NUM!"}}
- else if(typeof v==="boolean"){t="s";nv=v?"TRUE":"FALSE"}
+ if(isErr(v)){t="e";nv=CODIGOS[v.__err]}
+ else if(typeof v==="number"){if(Number.isFinite(v)){t="n";nv=v}else{t="e";nv=CODIGOS["#NUM!"]}}
+ else if(typeof v==="boolean"){t="b";nv=v}
  else{t="s";nv=String(v)}
  if(cell.v===nv&&cell.t===t)return false;
  cell.v=nv;cell.t=t;delete cell.w;
@@ -184,7 +188,7 @@ window.recalcularHoja=function(){
  const items=[];
  for(const nombre of WBF.SheetNames){
   const ws=WBF.Sheets[nombre];if(!ws||!ws["!ref"])continue;
-  for(const a of Object.keys(ws)){if(a[0]==="!")continue;const c=ws[a];if(c&&c.f)items.push({nombre,ws,a,c})}
+  for(const a of Object.keys(ws)){if(a[0]==="!")continue;const c=ws[a];if(c?.f&&!c.F)items.push({nombre,ws,a,c})}
  }
  for(let pass=0;pass<Math.min(30,items.length+1);pass++){
   let cambio=false;
@@ -200,35 +204,66 @@ window.recalcularHoja=function(){
 window.aplicarEdicionCelda=function(el){
  const ws=WBF.Sheets[HOJA_EXCEL],a=el.dataset.cell,c=ws[a];
  const nuevo=el.innerText.replace(/\r?\n/g," ").trim();
- const mostrado=valorCelda(c).trim();
- if(nuevo===mostrado||(c&&c.f&&nuevo==="="+c.f))return;
+ const mostrado=(el.dataset.valorInicial??String(valorCelda(c))).replace(/\r?\n/g," ").trim();
+ if(nuevo===mostrado||(c?.f&&nuevo==="="+c.f)){if(c?.f)el.textContent=mostrado;return}
  guardarValorCelda(a,nuevo);
 };
-const tb=document.getElementById("tb");
-tb.addEventListener("focusin",e=>{
- const td=e.target.closest&&e.target.closest("[data-cell]");if(!td)return;
- const c=WBF&&WBF.Sheets[HOJA_EXCEL]&&WBF.Sheets[HOJA_EXCEL][td.dataset.cell];
- if(c&&c.f&&td.textContent.trim()!=="="+c.f)td.textContent="="+c.f;
-});
-function enfocar(a){
- const n=tb.querySelector('[data-cell="'+a+'"]');if(!n)return;
- seleccionarCelda(a);n.focus();
+const tb=$("tb");
+function enfocar(address){
+ const n=tb.querySelector('[data-cell="'+address+'"]');
+ if(!n)return;
+ seleccionarCelda(address);n.focus();
  const r=document.createRange();r.selectNodeContents(n);
- const s=getSelection();s.removeAllRanges();s.addRange(r);
+ const seleccion=getSelection();seleccion.removeAllRanges();seleccion.addRange(r);
+}
+for(const contenedor of [tb,$("excelHead")]){
+ contenedor.addEventListener("focusin",e=>{
+  const td=e.target.closest("[data-cell]");if(!td||!WBF)return;
+  seleccionarCelda(td.dataset.cell);
+  const c=WBF.Sheets[HOJA_EXCEL][td.dataset.cell];
+  td.dataset.valorInicial=td.innerText;
+  if(c?.f)td.textContent="="+c.f;
+ });
 }
 tb.addEventListener("keydown",e=>{
- const td=e.target.closest&&e.target.closest("[data-cell]");if(!td)return;
+ const td=e.target.closest("[data-cell]");if(!td||e.isComposing||e.altKey||e.metaKey||e.ctrlKey)return;
  const k=e.key;if(!["Enter","Tab","Escape","ArrowUp","ArrowDown"].includes(k))return;
- e.preventDefault();
- const p=XLSX.utils.decode_cell(td.dataset.cell),c=WBF.Sheets[HOJA_EXCEL][td.dataset.cell];
- if(k==="Escape"){td.textContent=valorCelda(c);td.blur();return}
- const atras=e.shiftKey||k==="ArrowUp";
- const sig=XLSX.utils.encode_cell(k==="Tab"?{r:p.r,c:Math.max(0,p.c+(e.shiftKey?-1:1))}:{r:Math.max(0,p.r+(atras?-1:1)),c:p.c});
- td.blur();enfocar(sig);
+ const ws=WBF.Sheets[HOJA_EXCEL],address=td.dataset.cell;
+ if(k==="Escape"){e.preventDefault();td.textContent=td.dataset.valorInicial;td.blur();return}
+ const p=XLSX.utils.decode_cell(address),r=XLSX.utils.decode_range(ws["!ref"]);
+ const inicio=/Municipalidad/i.test(textoCelda(ws,"A1"))?Math.min(r.e.r,r.s.r+2):r.s.r;
+ const paso=e.shiftKey||k==="ArrowUp"?-1:1;
+ if(k==="Tab"){
+  p.c+=paso;
+  if(p.c>r.e.c){p.c=r.s.c;p.r++}
+  if(p.c<r.s.c){p.c=r.e.c;p.r--}
+ }else p.r+=paso;
+ if(p.r<inicio||p.r>r.e.r)return;
+ e.preventDefault();td.blur();
+ const pagina=Math.floor((p.r-inicio)/FILAS_POR_VISTA);
+ if(pagina!==paginaExcel)cambiarPaginaExcel(pagina-paginaExcel);
+ const merge=(ws["!merges"]||[]).find(m=>p.r>=m.s.r&&p.r<=m.e.r&&p.c>=m.s.c&&p.c<=m.e.c);
+ enfocar(XLSX.utils.encode_cell(merge?.s||p));
 });
 tb.addEventListener("paste",e=>{
- if(!(e.target.closest&&e.target.closest("[data-cell]")))return;
+ const td=e.target.closest("[data-cell]");if(!td||!e.clipboardData)return;
+ const texto=e.clipboardData.getData("text/plain").replace(/\r\n?/g,"\n");
  e.preventDefault();
- document.execCommand("insertText",false,(e.clipboardData.getData("text/plain")||"").replace(/\r?\n/g," "));
+ if(!/[\t\n]/.test(texto.replace(/\n$/,""))){
+  document.execCommand("insertText",false,texto.replace(/\n$/,""));return;
+ }
+ const filas=texto.replace(/\n$/,"").split("\n").map(fila=>fila.split("\t"));
+ const ws=WBF.Sheets[HOJA_EXCEL],inicio=XLSX.utils.decode_cell(td.dataset.cell),rango=XLSX.utils.decode_range(ws["!ref"]);
+ const final={r:inicio.r+filas.length-1,c:inicio.c+Math.max(...filas.map(fila=>fila.length))-1};
+ if(final.r>1048575||final.c>16383||filas.reduce((total,fila)=>total+fila.length,0)>20000){
+  $("est").className="est err";$("est").textContent="El rango pegado supera el límite de 20 000 celdas por operación o los límites de Excel.";return;
+ }
+ const cruza=(ws["!merges"]||[]).some(m=>m.s.r<=final.r&&m.e.r>=inicio.r&&m.s.c<=final.c&&m.e.c>=inicio.c);
+ if(cruza){$("est").className="est err";$("est").textContent="El rango pegado contiene celdas combinadas.";return}
+ td.textContent=td.dataset.valorInicial;td.blur();
+ filas.forEach((fila,y)=>fila.forEach((valor,x)=>escribirValorCelda(XLSX.utils.encode_cell({r:inicio.r+y,c:inicio.c+x}),valor)));
+ rango.e.r=Math.max(rango.e.r,final.r);rango.e.c=Math.max(rango.e.c,final.c);
+ ws["!ref"]=XLSX.utils.encode_range(rango);
+ recalcularHoja(ws);hoja(HOJA_EXCEL);enfocar(XLSX.utils.encode_cell(inicio));
 });
 })();
